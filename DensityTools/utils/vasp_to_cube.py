@@ -1,5 +1,4 @@
 import numpy as np
-import ase
 from ase.io import read, write
 import sys
 
@@ -22,7 +21,9 @@ def main(filename):
             n = line.shape[0]
             data[count:count+n] = line
             count += n
-        data = data.reshape(N_voxl, order='F')
+    data = data.reshape(N_voxl, order='F')
+    # scaling vasp 
+    data /= atoms.cell.volume
     write(f'{filename}.cube', atoms, data=data)
 
 if __name__ == '__main__':
@@ -31,3 +32,4 @@ if __name__ == '__main__':
     
     for filename in sys.argv[1:]:
         main(filename)
+
