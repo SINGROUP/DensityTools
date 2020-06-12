@@ -126,6 +126,28 @@ class System(ase.Atoms):
         rest_atoms.info['box_labels'] = box_atoms_names
         return rest_atoms
 
+    @classmethod
+    def from_database(cls, fdb, id_):
+        """
+        retrieve data from a database
+        :param fdb: instance of ase database
+        :param id_: id of the atoms
+        """
+        row = fdb.get(id_)
+        atoms = cls(row.toatoms())
+        if 'box' in row.data.keys():
+            N_voxl = np.array(row.data['box_data']['N_voxl'])
+            box = row.data['box']
+            voxl = atoms.cell.array / N_voxl
+            base = int(row.data['box_data']['base'] / voxl[2, 2])
+            box_labels = row.data['box_data']['box_atoms_names']
+
+            data = np.zeros([box.shape[0]] + N_voxl.tolist())
+            data[:, :, :, base:base+box.shape[3]] = box
+            atoms.info["box"] = data
+            atoms.info["box_labels"] = box_labels
+        return atoms
+
     def fill_with(self, atoms, voxl_size=3, skin=1):
         '''
         Adds atoms box to self
