@@ -146,6 +146,7 @@ class System(ase.Atoms):
             data[:, :, :, base:base+box.shape[3]] = box
             atoms.info["box"] = data
             atoms.info["box_labels"] = box_labels
+            atoms.info["base"] = row.data['box_data']['base']
         return atoms
 
     def fill_with(self, atoms, voxl_size=3, skin=1):
@@ -265,7 +266,7 @@ class System(ase.Atoms):
                                                           z_min:z_max]
         return density_data
 
-    def predict(self, func, width, height, base, index=slice(None),
+    def predict(self, func, width, height, base=None, index=slice(None),
                 voxl_size=0.2, sigma=None, skin=0):
         """
         Applies a prediction func to the system, within windows of given
@@ -277,7 +278,7 @@ class System(ase.Atoms):
         starts
         :param index: indices of the box data to be fed into the prediction
         function
-        :param voxl_size: voxel size in angstrom
+        :param voxl_size: voxl size in angstrom
         :param sigma: sigma for gaussian smearing, can be float, or list of
         floats for each index in the box data
         :param skin: the skin around the prediction to ignore. The predicted
@@ -288,6 +289,14 @@ class System(ase.Atoms):
         """
         if "box" not in self.info:
             self = self.__class__.from_trajectory([self])
+
+        if base is None:
+            if "base" in self.info.keys():
+                base = self.info["base"]
+            else:
+                raise ValueError(f"Base not found in "
+                                 f"{self.__class__.__name__}, provide with"
+                                 f"func")
 
         base_index = int(base / voxl_size)
         box = self.info['box'][index]
