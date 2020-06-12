@@ -265,7 +265,7 @@ class System(ase.Atoms):
         as output of func, and rest three dims are same as the box dims.
         """
         if "box" not in self.info:
-            self = self.__class__.from_trajoctory([self])
+            self = self.__class__.from_trajectory([self])
 
         base_index = int(base / voxl_size)
         box = self.info['box'][index]
