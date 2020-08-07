@@ -1,7 +1,7 @@
-import ase
+import numpy as np
 from ase.io import write
 from ase.io.cube import read_cube_data
-import numpy as np
+import ase
 from .utils.convolve import gauss, shift
 
 
@@ -304,31 +304,29 @@ class System(ase.Atoms):
         n_voxl = np.array(box.shape[-3:])
         skin_ind = int(skin / voxl_size)
 
-        atom_density = np.zeros([box.shape[0]]
-                                + (np.array(box.shape[1:]) +
-                                   skin_ind).tolist())
-        box_ = np.zeros(np.array(box.shape) * [1, 2, 2, 2])
-        for ind in range(box.shape[0]):
-            for i in range(2):
-                for j in range(2):
-                    for k in range(2):
-                        _ = box[ind].copy()
-                        box_[ind,
-                             i * n_voxl[0]:(i + 1) * n_voxl[0],
-                             j * n_voxl[1]:n_voxl[1] * (1 + j),
-                             k * n_voxl[2]:n_voxl[2] * (1 + k)] = _
-            atom_density[ind] = shift(box_[ind],
-                                      [skin_ind]*3)[:atom_density.shape[1],
-                                                    :atom_density.shape[2],
-                                                    :atom_density.shape[3]]
-
-        out = func(atom_density)
-
         if skin_ind:
-            out = out[:,
-                      skin_ind:-skin_ind,
-                      skin_ind:-skin_ind,
-                      skin_ind:-skin_ind]
+            atom_density = np.zeros([box.shape[0]]
+                                    + (np.array(box.shape[1:]) +
+                                       2 * skin_ind).tolist())
+            box_ = shift(box, [0]+(n_voxl - skin_ind).tolist())
+
+            atom_density[:,
+                         :n_voxl[0],
+                         :n_voxl[1],
+                         :n_voxl[2]] = box_
+            atom_density[:,
+                         -2*skin_ind:, :, :] = atom_density[:, :2*skin_ind, :, :]
+            atom_density[:,
+                         :, -2*skin_ind:, :] = atom_density[:, :, :2*skin_ind, :]
+            atom_density[:,
+                         :, :, -2*skin_ind:] = atom_density[:, :, :, :2*skin_ind]
+
+            out = func(atom_density)[:,
+                                     skin_ind:-skin_ind,
+                                     skin_ind:-skin_ind,
+                                     skin_ind:-skin_ind]
+        else:
+            out = func(box)
 
         return out
 
