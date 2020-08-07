@@ -63,16 +63,16 @@ class System(ase.Atoms):
         names = dump[0].arrays['names']
         if box_atoms_names is None:
             box_atoms_names = np.unique(names).tolist()
-        N_voxl = np.asarray(np.round(np.linalg.norm(dump[0].get_cell(),
+        n_voxl = np.asarray(np.round(np.linalg.norm(dump[0].get_cell(),
                                                     axis=1) / voxl_size),
                             dtype=int)
-        voxl = dump[0].get_cell() / N_voxl
+        voxl = dump[0].get_cell() / n_voxl
         if density:
             # If density is requested, then it is divided by voxl vol
             voxl_vol = np.dot(voxl[0, :], np.cross(voxl[1, :], voxl[2, :]))
         else:
             voxl_vol = 1
-        box = np.zeros([len(box_atoms_names)] + N_voxl.tolist())
+        box = np.zeros([len(box_atoms_names)] + n_voxl.tolist())
 
         rest_indx = np.where(np.sum([names == x
                                      for x in rest_atoms_names], axis=0))[0]
@@ -105,11 +105,17 @@ class System(ase.Atoms):
                 voxl_indx = np.asarray(np.floor(np.linalg.solve(voxl.T, com)),
                                        dtype=int)
                 try:
-                    box[type_ind, voxl_indx[0], voxl_indx[1], voxl_indx[2]] += 1 / voxl_vol / n_frames  # / n_water
-                except IndexError as e:
-                    voxl_indx[voxl_indx == N_voxl] = 0
-                    if np.all(voxl_indx < N_voxl):
-                        box[type_ind, voxl_indx[0], voxl_indx[1], voxl_indx[2]] += 1 / voxl_vol / n_frames
+                    box[type_ind,
+                        voxl_indx[0],
+                        voxl_indx[1],
+                        voxl_indx[2]] += 1 / voxl_vol / n_frames  # / n_water
+                except IndexError:
+                    voxl_indx[voxl_indx == n_voxl] = 0
+                    if np.all(voxl_indx < n_voxl):
+                        box[type_ind,
+                            voxl_indx[0],
+                            voxl_indx[1],
+                            voxl_indx[2]] += 1 / voxl_vol / n_frames
 
         if sigma is not None:
             sigma = np.array(sigma)
@@ -136,13 +142,13 @@ class System(ase.Atoms):
         row = fdb.get(id_)
         atoms = cls(row.toatoms())
         if 'box' in row.data.keys():
-            N_voxl = np.array(row.data['box_data']['N_voxl'])
+            n_voxl = np.array(row.data['box_data']['N_voxl'])
             box = row.data['box']
-            voxl = atoms.cell.array / N_voxl
+            voxl = atoms.cell.array / n_voxl
             base = int(row.data['box_data']['base'] / voxl[2, 2])
             box_labels = row.data['box_data']['box_atoms_names']
 
-            data = np.zeros([box.shape[0]] + N_voxl.tolist())
+            data = np.zeros([box.shape[0]] + n_voxl.tolist())
             data[:, :, :, base:base+box.shape[3]] = box
             atoms.info["box"] = data
             atoms.info["box_labels"] = box_labels
@@ -160,23 +166,23 @@ class System(ase.Atoms):
         if cell.rank != 3:
             raise RuntimeError(f'{self} does not have a valid cell')
         cell = (cell.T * (1 - skin / np.linalg.norm(cell, axis=1))).T
-        N_voxl = np.asarray(np.round(np.linalg.norm(cell, axis=1)
+        n_voxl = np.asarray(np.round(np.linalg.norm(cell, axis=1)
                                      / voxl_size), dtype=int)
-        voxl = (cell.T / N_voxl).T
-        box = np.ones(N_voxl, dtype=bool)
+        voxl = (cell.T / n_voxl).T
+        box = np.ones(n_voxl, dtype=bool)
 
         for i in range(len(self)):
             pos = self.get_positions()[i]
             voxl_indx = np.asarray(np.floor(np.linalg.solve(voxl.T, pos)),
                                    dtype=int)
-            voxl_indx[voxl_indx == N_voxl] = 0
+            voxl_indx[voxl_indx == n_voxl] = 0
             box[voxl_indx[0], voxl_indx[1], voxl_indx[2]] = False
-            for i in [-1, 0, 1]:
-                for j in [-1, 0, 1]:
-                    for k in [-1, 0, 1]:
-                        box[(i + voxl_indx[0]) % N_voxl[0],
-                            (j + voxl_indx[1]) % N_voxl[1],
-                            (k + voxl_indx[2]) % N_voxl[2]] = False
+            for ind_i in [-1, 0, 1]:
+                for ind_j in [-1, 0, 1]:
+                    for ind_k in [-1, 0, 1]:
+                        box[(ind_i + voxl_indx[0]) % n_voxl[0],
+                            (ind_j + voxl_indx[1]) % n_voxl[1],
+                            (ind_k + voxl_indx[2]) % n_voxl[2]] = False
 
         # checking the number of periodic cells of atoms needed
         indx = np.asarray(np.ceil(np.linalg.solve(atoms.cell.T,
@@ -192,7 +198,7 @@ class System(ase.Atoms):
         for i, pos in enumerate(atoms.get_positions()):
             voxl_indx = np.asarray(np.floor(np.linalg.solve(voxl.T, pos)),
                                    dtype=int)
-            if np.any(voxl_indx >= N_voxl) or np.any(voxl_indx < 0):
+            if np.any(voxl_indx >= n_voxl) or np.any(voxl_indx < 0):
                 # atoms outside box
                 mol_id_del |= set([atoms.get_tags()[i]])
             elif not box[voxl_indx[0], voxl_indx[1], voxl_indx[2]]:
@@ -211,29 +217,31 @@ class System(ase.Atoms):
                          height,
                          base,
                          overlap):
+        """Cuts box data into overlapping smaller boxes for training
+        """
         if 'box' not in self.info:
             raise ValueError('No box data attached')
         boxes = self.info['box']
-        N_voxl = boxes.shape[1:]
-        voxl = self.cell.array / N_voxl
+        n_voxl = boxes.shape[1:]
+        voxl = self.cell.array / n_voxl
         # Size of domain and overlap in the units of number of voxls
         domain_size = np.asarray(np.round([width, width, height]
                                           / np.diag(voxl)),
                                  dtype=int)
         overlap_size = np.asarray(np.round(overlap
-                                        / np.linalg.norm(voxl, axis=1)),
-                               dtype=int)[:2]
-        overlap_count = np.asarray(np.maximum((np.asarray(N_voxl)
-                                            - domain_size / 2)[:2]
-                                           // overlap_size,
-                                           np.ones(2)),
-                                dtype=int)
+                                           / np.linalg.norm(voxl, axis=1)),
+                                  dtype=int)[:2]
+        overlap_count = np.asarray(np.maximum((np.asarray(n_voxl)
+                                               - domain_size / 2)[:2]
+                                              // overlap_size,
+                                              np.ones(2)),
+                                   dtype=int)
 
         # periodic images of box and rest_cells needed
         indx = np.ceil(((overlap_count - 1)
                         * overlap_size
                         + domain_size[:2])
-                       / N_voxl[:2])
+                       / n_voxl[:2])
         indx = np.asarray(indx.tolist() + [1], dtype=int)
 
         # if periodic images needed, make them
@@ -242,9 +250,9 @@ class System(ase.Atoms):
             for ind in range(boxes.shape[0]):
                 for i in range(indx[0]):
                     for j in range(indx[1]):
-                        boxes_[ind, i * N_voxl[0]:(i + 1) * N_voxl[0],
-                        j * N_voxl[1]:N_voxl[1] * (1 + j),
-                        :] = boxes[ind].copy()
+                        boxes_[ind, i * n_voxl[0]:(i + 1) * n_voxl[0],
+                               j * n_voxl[1]:n_voxl[1] * (1 + j),
+                               :] = boxes[ind].copy()
             boxes = boxes_.copy()
         num_instances = int(np.prod(overlap_count))
         density_data = np.zeros([num_instances, boxes.shape[0]]
@@ -293,7 +301,7 @@ class System(ase.Atoms):
             for i in range(box.shape[0]):
                 box[i] = gauss(box[i], sigma=sigma[i], voxl_size=voxl_size)
 
-        N_voxl = np.array(box.shape[-3:])
+        n_voxl = np.array(box.shape[-3:])
         skin_ind = int(skin / voxl_size)
 
         atom_density = np.zeros([box.shape[0]]
@@ -304,10 +312,11 @@ class System(ase.Atoms):
             for i in range(2):
                 for j in range(2):
                     for k in range(2):
+                        _ = box[ind].copy()
                         box_[ind,
-                             i * N_voxl[0]:(i + 1) * N_voxl[0],
-                             j * N_voxl[1]:N_voxl[1] * (1 + j),
-                             k * N_voxl[2]:N_voxl[2] * (1 + k)] = box[ind].copy()
+                             i * n_voxl[0]:(i + 1) * n_voxl[0],
+                             j * n_voxl[1]:n_voxl[1] * (1 + j),
+                             k * n_voxl[2]:n_voxl[2] * (1 + k)] = _
             atom_density[ind] = shift(box_[ind],
                                       [skin_ind]*3)[:atom_density.shape[1],
                                                     :atom_density.shape[2],
@@ -323,9 +332,8 @@ class System(ase.Atoms):
 
         return out
 
-
     def predict_raster(self, func, width, height, base=None, index=slice(None),
-                voxl_size=0.2, sigma=None, skin=0):
+                       voxl_size=0.2, sigma=None, skin=0):
         """
         Applies a prediction func to the system, within windows of given
         dimensions.
@@ -383,16 +391,19 @@ class System(ase.Atoms):
             box_ = np.zeros([box.shape[0]]
                             + np.maximum(domain_size, start_shape).tolist())
             for i in range(box.shape[0]):
-                box_[i, :start_shape[0], :start_shape[1], :start_shape[2]] = box[i].copy()
+                box_[i,
+                     :start_shape[0],
+                     :start_shape[1],
+                     :start_shape[2]] = box[i].copy()
             box = box_.copy()
-        N_voxl = np.array(box.shape[-3:])
+        n_voxl = np.array(box.shape[-3:])
         skip_size = np.asarray(np.round(skip
                                         / np.linalg.norm(voxl, axis=1)),
                                dtype=int)[:2]
         internal_size = np.asarray(np.round((np.array([skip, skip, height]))
                                             / voxl_size),
                                    dtype=int)
-        skip_count = np.asarray(np.maximum((np.asarray(N_voxl)
+        skip_count = np.asarray(np.maximum((np.asarray(n_voxl)
                                             + domain_size / 2)[:2]
                                            // skip_size,
                                            np.ones(2)),
@@ -403,7 +414,7 @@ class System(ase.Atoms):
         indx = np.ceil(((skip_count - 1)
                         * skip_size
                         + internal_size[:2])
-                       / N_voxl[:2])
+                       / n_voxl[:2])
         indx = np.asarray(indx.tolist() + [1], dtype=int)
 
         # if periodic images needed, make them
@@ -412,32 +423,35 @@ class System(ase.Atoms):
             for ind in range(box.shape[0]):
                 for i in range(indx[0]):
                     for j in range(indx[1]):
-                        box_[ind, i * N_voxl[0]:(i + 1) * N_voxl[0],
-                        j * N_voxl[1]:N_voxl[1] * (1 + j),
-                        :] = box[ind].copy()
+                        box_[ind, i * n_voxl[0]:(i + 1) * n_voxl[0],
+                             j * n_voxl[1]:n_voxl[1] * (1 + j),
+                             :] = box[ind].copy()
             box = box_.copy()
 
         for i in range(skip_count[0]):
             for j in range(skip_count[1]):
                 print(domain_size, base_index, box.shape)
                 atom_density = np.zeros([box.shape[0]] + domain_size.tolist())
-                ss = (np.array([i * skip_size[0], j * skip_size[1], 0])
-                      - [edge_size, edge_size, 0])
+                sas = (np.array([i * skip_size[0], j * skip_size[1], 0])
+                       - [edge_size, edge_size, 0])
                 for ind in range(box.shape[0]):
-                    hold = shift(box[ind], ss)[:domain_size[0],
-                           :domain_size[1],
-                           base_index:domain_size[2] + base_index]
+                    hold = shift(box[ind], sas)[:domain_size[0],
+                                                :domain_size[1],
+                                                base_index:(domain_size[2]
+                                                            + base_index)]
                     atom_density[ind, :, :, :] = hold
                 hold = func(atom_density)
-                # initialise output matrix with same channels as output of network
+                # initialise output matrix with same channels
+                # as output of network
                 if i == 0 and j == 0:
-                    density_data = np.zeros([hold.shape[0]] + N_voxl.tolist())
-                max_x, max_y = np.minimum([internal_size[0] + i * skip_size[0],
-                                           internal_size[1] + j * skip_size[1]],
-                                          [N_voxl[0], N_voxl[1]])
-                hold_x, hold_y = np.minimum(np.asarray([N_voxl[0] + edge_size - i * skip_size[0],
-                                                        N_voxl[1] + edge_size - j * skip_size[1]],
-                                                       dtype=int),
+                    density_data = np.zeros([hold.shape[0]] + n_voxl.tolist())
+                vec = [internal_size[0] + i * skip_size[0],
+                       internal_size[1] + j * skip_size[1]]
+                max_x, max_y = np.minimum(vec, [n_voxl[0], n_voxl[1]])
+                vec = np.asarray([n_voxl[0] + edge_size - i * skip_size[0],
+                                  n_voxl[1] + edge_size - j * skip_size[1]],
+                                 dtype=int)
+                hold_x, hold_y = np.minimum(vec,
                                             [edge_size + internal_size[0],
                                              edge_size + internal_size[1]])
                 _ = hold[:,
@@ -448,4 +462,7 @@ class System(ase.Atoms):
                              i * skip_size[0]:max_x,
                              j * skip_size[1]:max_y,
                              base_index:internal_size[2] + base_index] = _
-        return density_data[:, :start_shape[0], :start_shape[1], :start_shape[2]]
+        return density_data[:,
+                            :start_shape[0],
+                            :start_shape[1],
+                            :start_shape[2]]
