@@ -266,7 +266,65 @@ class System(ase.Atoms):
                                                           z_min:z_max]
         return density_data
 
-    def predict(self, func, width, height, base=None, index=slice(None),
+    def predict(self, func, index=slice(None),
+                voxl_size=0.2, sigma=None, skin=0):
+        """
+        Applies a prediction func to the system.
+        :param func: the prediction function
+        :param index: indices of the box data to be fed into the prediction
+        function
+        :param voxl_size: voxl size in angstrom
+        :param sigma: sigma for gaussian smearing, can be float, or list of
+        floats for each index in the box data
+        :param skin: the skin around the prediction to ignore. The predicted
+        density is stitched so that the skin is removed, and only the inner
+        box covers the final density, placed adjacently.
+        :return: predicted density of dim 4, with the same number of indices
+        as output of func, and rest three dims are same as the box dims.
+        """
+        box = self.info['box'][index]
+        if sigma is not None:
+            sigma = np.array(sigma)
+            if sigma.shape == ():
+                sigma = np.array(sigma[None].tolist() * box.shape[0])
+            elif sigma.shape[0] != box.shape[0]:
+                raise RuntimeError("Number of sigma values do"
+                                   " not match types in the system")
+            for i in range(box.shape[0]):
+                box[i] = gauss(box[i], sigma=sigma[i], voxl_size=voxl_size)
+
+        N_voxl = np.array(box.shape[-3:])
+        skin_ind = int(skin / voxl_size)
+
+        atom_density = np.zeros([box.shape[0]]
+                                + (np.array(box.shape[1:]) +
+                                   skin_ind).tolist())
+        box_ = np.zeros(np.array(box.shape) * [1, 2, 2, 2])
+        for ind in range(box.shape[0]):
+            for i in range(2):
+                for j in range(2):
+                    for k in range(2):
+                        box_[ind,
+                             i * N_voxl[0]:(i + 1) * N_voxl[0],
+                             j * N_voxl[1]:N_voxl[1] * (1 + j),
+                             k * N_voxl[2]:N_voxl[2] * (1 + k)] = box[ind].copy()
+            atom_density[ind] = shift(box_[ind],
+                                      [skin_ind]*3)[:atom_density.shape[1],
+                                                    :atom_density.shape[2],
+                                                    :atom_density.shape[3]]
+
+        out = func(atom_density)
+
+        if skin_ind:
+            out = out[:,
+                      skin_ind:-skin_ind,
+                      skin_ind:-skin_ind,
+                      skin_ind:-skin_ind]
+
+        return out
+
+
+    def predict_raster(self, func, width, height, base=None, index=slice(None),
                 voxl_size=0.2, sigma=None, skin=0):
         """
         Applies a prediction func to the system, within windows of given
