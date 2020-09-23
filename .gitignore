@@ -93,3 +93,4 @@ profiling
 
 # Vim setup
 .vim
+*.swp

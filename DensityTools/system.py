@@ -1,3 +1,6 @@
+"""
+Defines System object
+"""
 import numpy as np
 from ase.io import write
 from ase.io.cube import read_cube_data
@@ -6,6 +9,9 @@ from .utils.convolve import gauss, shift
 
 
 class System(ase.Atoms):
+    """
+    Atoms object with added functions for density data
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -133,7 +139,7 @@ class System(ase.Atoms):
         return rest_atoms
 
     @classmethod
-    def from_database(cls, fdb, id_):
+    def from_database(cls, fdb, id_, old_format=False):
         """
         retrieve data from a database
         :param fdb: instance of ase database
@@ -142,17 +148,42 @@ class System(ase.Atoms):
         row = fdb.get(id_)
         atoms = cls(row.toatoms())
         if 'box' in row.data.keys():
-            n_voxl = np.array(row.data['box_data']['N_voxl'])
-            box = row.data['box']
-            voxl = atoms.cell.array / n_voxl
-            base = int(row.data['box_data']['base'] / voxl[2, 2])
-            box_labels = row.data['box_data']['box_atoms_names']
+            if old_format:
+                box = row.data['box']
+                n_voxl = np.array(row.data['box_data']['N_voxl'])
+                voxl = atoms.cell.array / n_voxl
+                base = int(row.data['box_data']['base'] / voxl[2, 2])
+                box_labels = row.data['box_data']['box_atoms_names']
 
-            data = np.zeros([box.shape[0]] + n_voxl.tolist())
-            data[:, :, :, base:base+box.shape[3]] = box
-            atoms.info["box"] = data
-            atoms.info["box_labels"] = box_labels
-            atoms.info["base"] = row.data['box_data']['base']
+                data = np.zeros([box.shape[0]] + n_voxl.tolist())
+                data[:, :, :, base:base+box.shape[3]] = box
+                atoms.info["box"] = data
+                atoms.info["box_labels"] = box_labels
+                atoms.info["base"] = row.data['box_data']['base']
+            else:
+                box = row.data['box']
+                base = row.data['base']
+                if 'N_voxl' in row.data.keys():
+                    n_voxl = np.array(row.data['N_voxl'])
+                elif 'height' in row.data.keys():
+                    height = row.data['height']
+                    n_z = atoms.cell.array[2, 2] * box.shape[3] / height
+                    n_voxl = np.array([box.shape[1],
+                                       box.shape[2],
+                                       n_z], dtype=int)
+                else:
+                    raise RuntimeError("number of voxl vector, 'N_voxl',"
+                                       " missing")
+
+                voxl = atoms.cell.array / n_voxl
+                base = int(base / voxl[2, 2])
+                box_labels = row.data['box_labels']
+
+                data = np.zeros([box.shape[0]] + n_voxl.tolist())
+                data[:, :, :, base:base+box.shape[3]] = box
+                atoms.info["box"] = data
+                atoms.info["box_labels"] = box_labels
+                atoms.info["base"] = row.data['base']
         return atoms
 
     def fill_with(self, atoms, voxl_size=3, skin=1):
@@ -215,12 +246,19 @@ class System(ase.Atoms):
     def box_to_fractions(self,
                          width,
                          height,
-                         base,
-                         overlap):
+                         base=None,
+                         overlap=None):
         """Cuts box data into overlapping smaller boxes for training
         """
         if 'box' not in self.info:
             raise ValueError('No box data attached')
+        if base is None:
+            if 'base' in self.info.keys():
+                base = self.info['base']
+            else:
+                raise RuntimeError('base not in atoms info')
+        if overlap is None:
+            overlap = width / 2
         boxes = self.info['box']
         n_voxl = boxes.shape[1:]
         voxl = self.cell.array / n_voxl
@@ -315,11 +353,14 @@ class System(ase.Atoms):
                          :n_voxl[1],
                          :n_voxl[2]] = box_
             atom_density[:,
-                         -2*skin_ind:, :, :] = atom_density[:, :2*skin_ind, :, :]
+                         -2*skin_ind:, :, :] = atom_density[:,
+                                                            :2*skin_ind, :, :]
             atom_density[:,
-                         :, -2*skin_ind:, :] = atom_density[:, :, :2*skin_ind, :]
+                         :, -2*skin_ind:, :] = atom_density[:,
+                                                            :, :2*skin_ind, :]
             atom_density[:,
-                         :, :, -2*skin_ind:] = atom_density[:, :, :, :2*skin_ind]
+                         :, :, -2*skin_ind:] = atom_density[:,
+                                                            :, :, :2*skin_ind]
 
             out = func(atom_density)[:,
                                      skin_ind:-skin_ind,
