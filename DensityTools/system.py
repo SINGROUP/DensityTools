@@ -139,13 +139,24 @@ class System(ase.Atoms):
         return rest_atoms
 
     @classmethod
-    def from_database(cls, fdb, id_, old_format=False):
+    def from_database(cls, fdb, id_=None, old_format=False):
         """
         retrieve data from a database
-        :param fdb: instance of ase database
-        :param id_: id of the atoms
+        :param fdb: instance of ase database or an ase AtomsRow from
+                    the database
+        :param id_: id of the atoms, if fdb is an instance of database
         """
-        row = fdb.get(id_)
+        if isinstance(fdb, ase.db.core.Database):
+            if id_ is not None:
+                row = fdb.get(id_)
+            else:
+                raise RuntimeError('if an instance of database is passed,'
+                                   ' then id_ cannot be None')
+        elif isinstance(fdb, ase.db.row.AtomsRow):
+            row = fdb
+        else:
+            raise RuntimeError('fdb should be either an instance of ase'
+                               'database or an AtomsRow from the database')
         atoms = cls(row.toatoms())
         if 'box' in row.data.keys():
             if old_format:
