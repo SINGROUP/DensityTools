@@ -522,7 +522,7 @@ class System(ase.Atoms):
         Returns data along z masked with a cylinder centered at
         atom
 
-        :param atom: atom number in the object
+        :param atom: atom number in the object, or xy position
         :param box: box data, if not attached in the System object
         :param rad: radius of cylender in xy to mean(default = 1)
         :param mean: return mean 1D data in z
@@ -539,9 +539,14 @@ class System(ase.Atoms):
             print('additional dimension added to box')
             box = box[None, :, :, :]
 
+        if isinstance(atom, int):
+            position = self.positions[atom, :2]
+        else:
+            position = np.array(atom)[:2]
+
         mask = np.zeros(box.shape[1:], dtype=int)
         voxl = self.cell.array[:2, :2] / box.shape[1:3]
-        pos = np.linalg.solve(voxl.T, self.positions[atom, :2])
+        pos = np.linalg.solve(voxl.T, position)
         rad_size = rad / np.mean(voxl)
 
         for i in range(box.shape[1]):
