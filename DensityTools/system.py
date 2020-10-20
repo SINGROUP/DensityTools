@@ -516,3 +516,40 @@ class System(ase.Atoms):
                             :start_shape[0],
                             :start_shape[1],
                             :start_shape[2]]
+    
+    def z_cyl_on_atom(self, atom, box=None, rad=1, mean=True):
+        """
+        Returns data along z masked with a cylinder centered at
+        atom
+
+        :param atom: atom number in the object
+        :param box: box data, if not attached in the System object
+        :param rad: radius of cylender in xy to mean(default = 1)
+        :param mean: return mean 1D data in z
+        :return: numpy array of the data, with cylindrical mask"""
+
+        if box is None:
+            if 'box' in self.info.keys():
+                box = self.info['box']
+            else:
+               raise RuntimeError(f'No box data provided,'
+                                  f' or exists in {self.__class__.__name__}')
+
+        if len(box.shape) == 3:
+            print('additional dimension added to box')
+            box = box[None, :, :, :]
+
+        mask = np.zeros(box.shape[1:], dtype=int)
+        voxl = self.cell.array[:2, :2] / box.shape[1:3]
+        pos = np.linalg.solve(voxl.T, self.positions[atom, :2])
+        rad_size = rad / np.mean(voxl)
+
+        for i in range(box.shape[1]):
+            for j in range(box.shape[2]):
+                mask[i, j, :] = (np.linalg.norm(pos - np.array([i, j]))
+                                 < rad_size)
+
+        if mean:
+            return np.mean(mask * box, axis=(1, 2))
+        else:
+            return mask * box
