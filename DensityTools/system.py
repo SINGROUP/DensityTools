@@ -258,7 +258,8 @@ class System(ase.Atoms):
                          width,
                          height,
                          base=None,
-                         overlap=None):
+                         overlap=None,
+                         voxl_size=None):
         """Cuts box data into overlapping smaller boxes for training
         """
         if 'box' not in self.info:
@@ -272,7 +273,10 @@ class System(ase.Atoms):
             overlap = width / 2
         boxes = self.info['box']
         n_voxl = boxes.shape[1:]
-        voxl = self.cell.array / n_voxl
+        if voxl_size is None:
+            voxl = self.cell.array / n_voxl
+        else:
+            voxl = np.diag([voxl_size] * 3)
         # Size of domain and overlap in the units of number of voxls
         domain_size = np.asarray(np.round([width, width, height]
                                           / np.diag(voxl)),
