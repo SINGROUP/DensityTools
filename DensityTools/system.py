@@ -24,7 +24,20 @@ class System(ase.Atoms):
         """
         if 'box' not in self.info:
             raise ValueError('No box data attached')
+        self.untrim_data()
         write(filename, self, format='cube', data=self.info['box'][index])
+
+    def get_density(self):
+        """Returns density stored in the data
+
+        Returns:
+            numpy.ndarray: The data stored in the atoms
+        """
+        if 'box' in self.info:
+            self.untrim_data()
+            return self.info["box"]
+        else:
+            raise ValueError('No box data attached')
 
     @classmethod
     def from_cube(cls, filename):
@@ -47,20 +60,27 @@ class System(ase.Atoms):
                         voxl_size=0.2,
                         sigma=None,
                         n_frames=None,
-                        density=True):
+                        density=True,
+                        rest_pos_mean=False):
         """
         Get system from dump trajectory
-        :param dump: :class:`ase.Atoms` object in a list or trajectory
-        :param rest_atoms_names: list of atom names not in density
-        :param box_atoms_names: list of atom names in density,
-         defaults to all the atom types.
-        :param voxl_size: int, in angstrom, defaults to 0.5
-        :param sigma: sigma for gaussian smearing, can be list for each atom
-         type in box_atoms_names, defaults to None.
-        :param n_frames: last n frames to use, defaults to None.
-        :param density: If the value should be divided by volume
-        :return: :class:`DensityTools.System` object with atoms defined in
-         rest_atoms_names, and a 'box' in :method:`ase.Atoms.info`.
+
+        Args:
+            dump (ase.Atoms): :class:`ase.Atoms` object in a list or trajectory
+            rest_atoms_names (list): list of atom names not in density
+            box_atoms_names (list): list of atom names in density,
+                defaults to all the atom types.
+            voxl_size (float): voxel size in angstrom, defaults to 0.5
+            sigma (float): sigma for gaussian smearing, can be list for each
+                atom type in box_atoms_names, defaults to None.
+            n_frames (int): last n frames to use, defaults to None.
+            density (bool): If the value should be divided by volume
+            rest_pos_mean (bool): If the position of the rest atoms be averaged
+                over the run. Otherwise, last value is recorded.
+
+        Returns:
+            :class:`DensityTools.System`: object with atoms defined in
+                rest_atoms_names, and a 'box' in :method:`ase.Atoms.info`.
         """
         if n_frames is None:
             n_frames = len(dump)
@@ -82,12 +102,12 @@ class System(ase.Atoms):
 
         rest_indx = np.where(np.sum([names == x
                                      for x in rest_atoms_names], axis=0))[0]
-        rest_atoms = dump[0][rest_indx]
+        rest_atoms = dump[-1][rest_indx]
 
         positions = []
         for count, atom in enumerate(dump[-n_frames:]):
             # print('\r {:.2%}'.format(count/(n_frames-1)), end='')
-            if count == 0:
+            if count == 0 and rest_pos_mean:
                 rest_atoms.positions = atom.positions[rest_indx]
                 pos_old = rest_atoms.get_scaled_positions()
                 positions = pos_old / n_frames
@@ -96,7 +116,7 @@ class System(ase.Atoms):
                 stack = np.vstack([(np.zeros_like(positions) - 1)[None, :],
                                    (np.zeros_like(positions))[None, :],
                                    (np.zeros_like(positions) + 1)[None, :]])
-            else:
+            elif rest_pos_mean:
                 rest_atoms.positions = atom.positions[rest_indx]
                 pos_new = rest_atoms.get_scaled_positions()
                 pos_new += np.argmin(np.abs(stack + pos_new - pos_old),
@@ -122,6 +142,8 @@ class System(ase.Atoms):
                             voxl_indx[0],
                             voxl_indx[1],
                             voxl_indx[2]] += 1 / voxl_vol / n_frames
+        if rest_pos_mean:
+            rest_atoms.set_scaled_positions(positions)
 
         if sigma is not None:
             sigma = np.array(sigma)
@@ -142,9 +164,11 @@ class System(ase.Atoms):
     def from_database(cls, fdb, id_=None, old_format=False):
         """
         retrieve data from a database
-        :param fdb: instance of ase database or an ase AtomsRow from
-                    the database
-        :param id_: id of the atoms, if fdb is an instance of database
+
+        Args:
+            fdb (ase.db.core.Database): instance of ase database or an ase
+                AtomsRow from the database
+            id_ (int): id of the atoms, if fdb is an instance of database
         """
         if isinstance(fdb, ase.db.core.Database):
             if id_ is not None:
@@ -157,52 +181,96 @@ class System(ase.Atoms):
         else:
             raise RuntimeError('fdb should be either an instance of ase'
                                'database or an AtomsRow from the database')
-        atoms = cls(row.toatoms())
-        if 'box' in row.data.keys():
-            if old_format:
-                box = row.data['box']
-                n_voxl = np.array(row.data['box_data']['N_voxl'])
-                voxl = atoms.cell.array / n_voxl
-                base = int(row.data['box_data']['base'] / voxl[2, 2])
-                box_labels = row.data['box_data']['box_atoms_names']
+        atoms = cls(row.toatoms(add_additional_information=True))
+        for key, value in atoms.info.pop('data').items():
+            atoms.info[key] = value
 
-                data = np.zeros([box.shape[0]] + n_voxl.tolist())
-                data[:, :, :, base:base+box.shape[3]] = box
-                atoms.info["box"] = data
-                atoms.info["box_labels"] = box_labels
-                atoms.info["base"] = row.data['box_data']['base']
-            else:
-                box = row.data['box']
-                base = row.data['base']
-                if 'N_voxl' in row.data.keys():
-                    n_voxl = np.array(row.data['N_voxl'])
-                elif 'height' in row.data.keys():
-                    height = row.data['height']
-                    n_z = atoms.cell.array[2, 2] * box.shape[3] / height
-                    n_voxl = np.array([box.shape[1],
-                                       box.shape[2],
-                                       n_z], dtype=int)
-                else:
-                    raise RuntimeError("number of voxl vector, 'N_voxl',"
-                                       " missing")
-
-                voxl = atoms.cell.array / n_voxl
-                base = int(base / voxl[2, 2])
-                box_labels = row.data['box_labels']
-
-                data = np.zeros([box.shape[0]] + n_voxl.tolist())
-                data[:, :, :, base:base+box.shape[3]] = box
-                atoms.info["box"] = data
-                atoms.info["box_labels"] = box_labels
-                atoms.info["base"] = row.data['base']
+        if old_format:
+            for key, value in atoms.info.pop('box_data', {}).items():
+                if key == 'box_atoms_names':
+                    key = 'box_labels'
+                atoms.info[key] = value
         return atoms
+
+    def to_database(self, fdb, base=0, height=None):
+        """
+        send data to a database
+
+        Args:
+            fdb (ase.db.core.Database): instance of ase database
+        Returns:
+            int: id in the database where added
+        """
+        self.trim_data(base, height)
+        return fdb.write(self, data=self.info)
+
+    def trim_data(self, base=0, height=None):
+        """Trims data to a selected slab
+
+        Args:
+            base (float): base of the selected slab in angstrom
+            height (float): height of slab in angstrom
+        """
+        if 'box' not in self.info:
+            raise ValueError('No box data attached')
+        if base == 0 and height is None:
+            return
+        box = self.get_density()
+        n_voxl = box.shape[1:]
+        voxl = self.get_cell() / n_voxl
+
+        # selecting region of interest
+        base_ind = int(base / voxl[2, 2])
+        if height:
+            top_ind = int(height / voxl[2, 2]) + base_ind
+        else:
+            top_ind = box.shape[-1]
+            height = self.get_cell()[2, 2]
+        box = box[:, :, :, base_ind:top_ind]
+        self.info['box'] = box
+        self.info['base'] = base
+        self.info['N_voxl'] = n_voxl
+        self.info['height'] = height
+        self.info['trimmed'] = True
+
+    def untrim_data(self):
+        """Saves whole data if trimmed before. All additional data is zero
+        """
+        if 'box' not in self.info:
+            raise ValueError('No box data attached')
+        trimmed = self.info.get('trimmed', False)
+        if not trimmed:
+            return
+        box = self.info['box']
+        base = self.info['base']
+        if 'N_voxl' in self.info.keys():
+            n_voxl = np.array(self.info['N_voxl'])
+        elif 'height' in self.info.keys():
+            height = self.info['height']
+            n_z = self.cell.array[2, 2] * box.shape[3] / height
+            n_voxl = np.array([box.shape[1],
+                               box.shape[2],
+                               n_z], dtype=int)
+        else:
+            raise RuntimeError("number of voxl vector, 'N_voxl',"
+                               " missing")
+
+        voxl = self.get_cell() / n_voxl
+        base_ind = int(base / voxl[2, 2])
+
+        data = np.zeros([box.shape[0]] + n_voxl.tolist())
+        data[:, :, :, base_ind:base_ind+box.shape[3]] = box
+        self.info["box"] = data
+        self.info.pop('trimmed')
 
     def fill_with(self, atoms, voxl_size=3, skin=1):
         '''
         Adds atoms box to self
-        :param atoms: ase.Atoms with periodic boundary conditions
-        :param voxl_size: voxl size in angstrom. Default is 3 angstroms
-        :param skin: skin to remove atoms on edge. Default is 1 angstrom
+
+        Args:
+            atoms (Atoms): ase.Atoms with periodic boundary conditions
+            voxl_size (float): voxl size in angstrom. Default is 3 angstroms
+            skin (float): skin to remove atoms on edge. Default is 1 angstrom
         '''
         cell = self.get_cell()
         if cell.rank != 3:
@@ -331,18 +399,25 @@ class System(ase.Atoms):
                 voxl_size=0.2, sigma=None, skin=0):
         """
         Applies a prediction func to the system.
-        :param func: the prediction function
-        :param index: indices of the box data to be fed into the prediction
-        function
-        :param voxl_size: voxl size in angstrom
-        :param sigma: sigma for gaussian smearing, can be float, or list of
-        floats for each index in the box data
-        :param skin: the skin around the prediction to ignore. The predicted
-        density is stitched so that the skin is removed, and only the inner
-        box covers the final density, placed adjacently.
-        :return: predicted density of dim 4, with the same number of indices
-        as output of func, and rest three dims are same as the box dims.
+
+        Args:
+            func (function): the prediction function
+            index (list): indices of the box data to be fed into the prediction
+                function
+            voxl_size (float): voxl size in angstrom
+            sigma (float): sigma for gaussian smearing, can be float, or list
+                of floats for each index in the box data
+            skin (float): the skin around the prediction to ignore. The
+                predicted density is stitched so that the skin is removed, and
+                only the inner box covers the final density, placed adjacently.
+
+        Returns:
+            numpy.ndarray: predicted density of dim 4, with the same number
+                of indices as output of func, and rest three dims are same as
+                the box dims.
         """
+        if 'box' not in self.info:
+            raise ValueError('No box data attached')
         box = self.info['box'][index]
         if sigma is not None:
             sigma = np.array(sigma)
@@ -520,7 +595,7 @@ class System(ase.Atoms):
                             :start_shape[0],
                             :start_shape[1],
                             :start_shape[2]]
-    
+
     def z_cyl_on_atom(self, atom, box=None, rad=1, mean=True):
         """
         Returns data along z masked with a cylinder centered at
@@ -536,8 +611,8 @@ class System(ase.Atoms):
             if 'box' in self.info.keys():
                 box = self.info['box']
             else:
-               raise RuntimeError(f'No box data provided,'
-                                  f' or exists in {self.__class__.__name__}')
+                raise ValueError('No box data provided,'
+                                 ' or exists in {self.__class__.__name__}')
 
         if len(box.shape) == 3:
             print('additional dimension added to box')
