@@ -145,19 +145,12 @@ class System(ase.Atoms):
         if rest_pos_mean:
             rest_atoms.set_scaled_positions(positions)
 
-        if sigma is not None:
-            sigma = np.array(sigma)
-            if sigma.shape == ():
-                sigma = np.array(sigma[None].tolist() * box.shape[0])
-            elif sigma.shape[0] != box.shape[0]:
-                raise RuntimeError("Number of sigma values do"
-                                   " not match types in the system")
-            for i in range(box.shape[0]):
-                box[i] = gauss(box[i], sigma=sigma[i], voxl_size=voxl_size)
-
         rest_atoms = cls(rest_atoms)
         rest_atoms.info['box'] = box
         rest_atoms.info['box_labels'] = box_atoms_names
+
+        if sigma is not None:
+            rest_atoms.gauss_smear(sigma, voxl_size=voxl_size)
         return rest_atoms
 
     @classmethod
@@ -262,6 +255,29 @@ class System(ase.Atoms):
         data[:, :, :, base_ind:base_ind+box.shape[3]] = box
         self.info["box"] = data
         self.info.pop('trimmed')
+
+    def gauss_smear(self, sigma=0, voxl_size=0.2):
+        """Smears the box data with a gaussian
+
+        Args:
+            sigma (float or list of float): sigma of the gaussian, for each
+            index, or one sigma for all indices
+        """
+        if 'box' not in self.info:
+            raise ValueError('No box data attached')
+        self.untrim_data()
+        box = self.info['box']
+        if sigma:
+            sigma = np.array(sigma)
+            if sigma.shape == ():
+                sigma = np.array(sigma[None].tolist() * box.shape[0])
+            elif sigma.shape[0] != box.shape[0]:
+                raise RuntimeError("Number of sigma values do"
+                                   " not match types in the system")
+            for i in range(box.shape[0]):
+                box[i] = gauss(box[i], sigma=sigma[i], voxl_size=voxl_size)
+
+            self.info['box'] = box
 
     def fill_with(self, atoms, voxl_size=3, skin=1):
         '''
