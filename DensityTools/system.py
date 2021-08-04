@@ -14,7 +14,13 @@ class System(ase.Atoms):
     """
 
     def __init__(self, *args, **kwargs):
+        names = args[0].arrays.get('names', None)
         super().__init__(*args, **kwargs)
+        if names is not None:
+            self.arrays['names'] = names
+        for key, value in args[0].arrays.items():
+            if key not in self.arrays:
+                self.arrays[key] = value
 
     def save_cube(self, filename, index=-1):
         """
@@ -288,6 +294,10 @@ class System(ase.Atoms):
             voxl_size (float): voxl size in angstrom. Default is 3 angstroms
             skin (float): skin to remove atoms on edge. Default is 1 angstrom
         '''
+        # wrapping
+        self.wrap()
+        atoms = atoms.copy()
+        atoms.wrap()
         cell = self.get_cell()
         if cell.rank != 3:
             raise RuntimeError(f'{self} does not have a valid cell')
@@ -297,8 +307,7 @@ class System(ase.Atoms):
         voxl = (cell.T / n_voxl).T
         box = np.ones(n_voxl, dtype=bool)
 
-        for i in range(len(self)):
-            pos = self.get_positions()[i]
+        for i, pos in enumerate(self.get_positions()):
             voxl_indx = np.asarray(np.floor(np.linalg.solve(voxl.T, pos)),
                                    dtype=int)
             voxl_indx[voxl_indx == n_voxl] = 0
@@ -311,32 +320,53 @@ class System(ase.Atoms):
                             (ind_k + voxl_indx[2]) % n_voxl[2]] = False
 
         # checking the number of periodic cells of atoms needed
-        indx = np.asarray(np.ceil(np.linalg.solve(atoms.cell.T,
-                                                  np.sum(self.cell,
-                                                         axis=0))),
-                          dtype=int)
-        if not np.all(indx == 1):
-            atoms *= indx
+        indx0 = np.zeros(3, dtype=int)
+        indx1 = np.zeros(3, dtype=int)
+
+        for x in range(2):
+            for y in range(2):
+                for z in range(2):
+                    indx = np.linalg.solve(atoms.cell.T,
+                                           np.matmul(cell.T,
+                                                     [x, y, z]))
+                    sign = np.asarray(indx > 0, dtype=int) * 2 - 1
+                    indx = np.asarray(np.ceil(np.abs(indx)), dtype=int)
+                    indx *= sign
+
+                    indx0 = np.minimum(indx0, indx, dtype=int)
+                    indx1 = np.maximum(indx1, indx, dtype=int)
+
+        if not np.all(indx1 - indx0 == 1):
+            cell_old = atoms.cell.array.copy()
+            atoms *= (indx1 - indx0)
+            atoms.positions += np.matmul(cell_old.T, indx0)
 
         # removing molecules which are close to atoms in self
-        # or outside the cell
+        try:
+            mol_id = atoms.get_array("mol-id")
+        except KeyError:
+            raise RuntimeError('mol-id is needed to group molecules for'
+                               'deletion')
         mol_id_del = set()
         for i, pos in enumerate(atoms.get_positions()):
             voxl_indx = np.asarray(np.floor(np.linalg.solve(voxl.T, pos)),
                                    dtype=int)
             if np.any(voxl_indx >= n_voxl) or np.any(voxl_indx < 0):
                 # atoms outside box
-                mol_id_del |= set([atoms.get_tags()[i]])
+                mol_id_del |= set([mol_id[i]])
             elif not box[voxl_indx[0], voxl_indx[1], voxl_indx[2]]:
-                mol_id_del |= set([atoms.get_tags()[i]])
+                mol_id_del |= set([mol_id[i]])
 
         # getting indices of all the atoms not in mol_id_del
         ind = []
-        for i in atoms.get_tags():
-            if i not in mol_id_del:
-                ind += np.where(atoms.get_tags() == i)[0].tolist()
+        for i, m_i in enumerate(mol_id):
+            if m_i not in mol_id_del:
+                ind.append(i)
 
-        self += atoms[ind]
+        if len(ind) > 0:
+            self += atoms[ind]
+        else:
+            raise RuntimeError('No space to fill atoms')
 
     def box_to_fractions(self,
                          width,
