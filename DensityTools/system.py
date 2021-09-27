@@ -680,6 +680,6 @@ class System(ase.Atoms):
                                  < rad_size)
 
         if mean:
-            return np.mean(mask * box, axis=(1, 2))
+            return np.sum(mask * box, axis=(1, 2)) / np.sum(mask, axis=(0, 1))
         else:
             return mask * box
