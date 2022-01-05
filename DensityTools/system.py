@@ -14,13 +14,16 @@ class System(ase.Atoms):
     """
 
     def __init__(self, *args, **kwargs):
-        names = args[0].arrays.get('names', None)
-        super().__init__(*args, **kwargs)
-        if names is not None:
-            self.arrays['names'] = names
-        for key, value in args[0].arrays.items():
-            if key not in self.arrays:
-                self.arrays[key] = value
+        try:
+            names = args[0].arrays.get('names', None)
+            super().__init__(*args, **kwargs)
+            if names is not None:
+                self.arrays['names'] = names
+            for key, value in args[0].arrays.items():
+                if key not in self.arrays:
+                    self.arrays[key] = value
+        except IndexError:
+            super().__init__(*args, **kwargs)
 
     def save_cube(self, filename, index=-1):
         """
@@ -373,8 +376,17 @@ class System(ase.Atoms):
                          height,
                          base=None,
                          overlap=None,
-                         voxl_size=None):
+                         voxl_size=None,
+                         get_atoms=False):
         """Cuts box data into overlapping smaller boxes for training
+
+        Args:
+            width (float): width in angstrom of the box
+            height (float): height in angstrom of the box
+            base (float): base in angstrom from where to form the box
+            overlap (float): overlap in angstrom of the boxes. Default: width/2
+            voxl_size (float): voxl size in angstrom of the box
+            get_atoms (bool): if atoms in the boxes to be returned
         """
         if 'box' not in self.info:
             raise ValueError('No box data attached')
@@ -439,10 +451,48 @@ class System(ase.Atoms):
                                                           x_min:x_max,
                                                           y_min:y_max,
                                                           z_min:z_max]
+
+        if get_atoms:
+            atoms_list = [None for _ in range(num_instances)]
+            dummy_atoms = self.copy()
+            dummy_atoms.info = {}
+            # if periodic images needed
+            if np.any(indx != 1):
+                dummy_atoms *= indx
+            z_min = int(base / voxl[2, 2]) * voxl_size
+            overlap_size = overlap_size * voxl_size
+            domain_size = domain_size * voxl_size
+            for i in range(overlap_count[0]):
+                for j in range(overlap_count[1]):
+                    _ = i * overlap_count[1] + j
+                    x_min = i * overlap_size[0]
+                    y_min = j * overlap_size[1]
+                    x_max = domain_size[0] + i * overlap_size[0]
+                    y_max = domain_size[1] + j * overlap_size[1]
+                    z_max = z_min + domain_size[2]
+                    hold_atoms = dummy_atoms.copy()
+                    hold_atoms.positions -= [x_min, y_min, z_min]
+                    hold_atoms.wrap()
+                    hold_atoms.wrap()
+                    del_mask = set()
+                    del_mask |= set(np.where(hold_atoms.positions[:, 0] >=
+                                             domain_size[0])[0])
+                    del_mask |= set(np.where(hold_atoms.positions[:, 1] >=
+                                             domain_size[1])[0])
+                    del_mask |= set(np.where(hold_atoms.positions[:, 2] >=
+                                             domain_size[2])[0])
+                    mask = np.setdiff1d(np.arange(len(self)),
+                                        list(del_mask))
+                    final_atoms = hold_atoms[mask]
+                    final_atoms.cell = np.diag(domain_size)
+                    atoms_list[_] = final_atoms
+            return density_data, atoms_list
+
         return density_data
 
     def predict(self, func, index=slice(None),
-                voxl_size=0.2, sigma=None, skin=0):
+                voxl_size=0.2, base=0, height=None,
+                sigma=None, skin=0):
         """
         Applies a prediction func to the system.
 
@@ -451,6 +501,8 @@ class System(ase.Atoms):
             index (list): indices of the box data to be fed into the prediction
                 function
             voxl_size (float): voxl size in angstrom
+            base (int): base, in angstrom, for the calculation
+            height (int): height, in angstrom, for the calculation
             sigma (float): sigma for gaussian smearing, can be float, or list
                 of floats for each index in the box data
             skin (float): the skin around the prediction to ignore. The
@@ -474,6 +526,13 @@ class System(ase.Atoms):
                                    " not match types in the system")
             for i in range(box.shape[0]):
                 box[i] = gauss(box[i], sigma=sigma[i], voxl_size=voxl_size)
+
+        base = int(np.round(base / voxl_size))
+        if height is None:
+            height = int(box.shape[-1] - base)
+        else:
+            height = int(np.round(height / voxl_size))
+        box = box[:, :, :, base:height+base]
 
         n_voxl = np.array(box.shape[-3:])
         skin_ind = int(skin / voxl_size)
