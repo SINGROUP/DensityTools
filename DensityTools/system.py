@@ -411,7 +411,7 @@ class System(ase.Atoms):
                                            / np.linalg.norm(voxl, axis=1)),
                                   dtype=int)[:2]
         overlap_count = np.asarray(np.maximum((np.asarray(n_voxl)
-                                               - domain_size / 2)[:2]
+                                               + domain_size / 2)[:2]
                                               // overlap_size,
                                               np.ones(2)),
                                    dtype=int)
