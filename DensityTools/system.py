@@ -6,6 +6,7 @@ from ase.io import write
 from ase.io.cube import read_cube_data
 import ase
 from .utils.convolve import gauss, shift
+import copy
 
 
 class System(ase.Atoms):
@@ -411,10 +412,12 @@ class System(ase.Atoms):
                                            / np.linalg.norm(voxl, axis=1)),
                                   dtype=int)[:2]
         overlap_count = np.asarray(np.maximum((np.asarray(n_voxl)
-                                               + domain_size / 2)[:2]
+                                               - domain_size / 2)[:2]
                                               // overlap_size,
                                               np.ones(2)),
-                                   dtype=int)
+                                   dtype=int) + [1, 1]
+        # next section zero point
+        overlap_zero = domain_size[:2] - overlap_size
 
         # periodic images of box and rest_cells needed
         indx = np.ceil(((overlap_count - 1)
@@ -442,10 +445,10 @@ class System(ase.Atoms):
             for i in range(overlap_count[0]):
                 for j in range(overlap_count[1]):
                     _ = i * overlap_count[1] + j
-                    x_min = i * overlap_size[0]
-                    y_min = j * overlap_size[1]
-                    x_max = domain_size[0] + i * overlap_size[0]
-                    y_max = domain_size[1] + j * overlap_size[1]
+                    x_min = i * overlap_zero[0]
+                    y_min = j * overlap_zero[1]
+                    x_max = domain_size[0] + i * overlap_zero[0]
+                    y_max = domain_size[1] + j * overlap_zero[1]
                     z_max = z_min + domain_size[2]
                     density_data[_, ind, :, :, :] = boxes[ind,
                                                           x_min:x_max,
@@ -458,19 +461,19 @@ class System(ase.Atoms):
             dummy_atoms.info = {}
             # if periodic images needed
             if np.any(indx != 1):
-                dummy_atoms *= indx
+                dummy_atoms = dummy_atoms * indx
             z_min = int(base / voxl[2, 2]) * voxl_size
-            overlap_size = overlap_size * voxl_size
+            overlap_zero = overlap_zero * voxl_size
             domain_size = domain_size * voxl_size
             for i in range(overlap_count[0]):
                 for j in range(overlap_count[1]):
                     _ = i * overlap_count[1] + j
-                    x_min = i * overlap_size[0]
-                    y_min = j * overlap_size[1]
-                    x_max = domain_size[0] + i * overlap_size[0]
-                    y_max = domain_size[1] + j * overlap_size[1]
+                    x_min = i * overlap_zero[0]
+                    y_min = j * overlap_zero[1]
+                    x_max = domain_size[0] + i * overlap_zero[0]
+                    y_max = domain_size[1] + j * overlap_zero[1]
                     z_max = z_min + domain_size[2]
-                    hold_atoms = dummy_atoms.copy()
+                    hold_atoms = copy.deepcopy(dummy_atoms)
                     hold_atoms.positions -= [x_min, y_min, z_min]
                     hold_atoms.wrap()
                     hold_atoms.wrap()
@@ -481,7 +484,7 @@ class System(ase.Atoms):
                                              domain_size[1])[0])
                     del_mask |= set(np.where(hold_atoms.positions[:, 2] >=
                                              domain_size[2])[0])
-                    mask = np.setdiff1d(np.arange(len(self)),
+                    mask = np.setdiff1d(np.arange(len(hold_atoms)),
                                         list(del_mask))
                     final_atoms = hold_atoms[mask]
                     final_atoms.cell = np.diag(domain_size)
