@@ -225,7 +225,7 @@ class System(ase.Atoms):
         # selecting region of interest
         base_ind = int(base / voxl[2, 2])
         if height:
-            top_ind = int(height / voxl[2, 2]) + base_ind
+            top_ind = int(np.round(height / voxl[2, 2])) + base_ind
         else:
             top_ind = box.shape[-1]
             height = self.get_cell()[2, 2]
