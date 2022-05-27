@@ -71,7 +71,8 @@ class System(ase.Atoms):
                         sigma=None,
                         n_frames=None,
                         density=True,
-                        rest_pos_mean=False):
+                        rest_pos_mean=False,
+                        force_orthogonality=True):
         """
         Get system from dump trajectory
 
@@ -87,7 +88,8 @@ class System(ase.Atoms):
             density (bool): If the value should be divided by volume
             rest_pos_mean (bool): If the position of the rest atoms be averaged
                 over the run. Otherwise, last value is recorded.
-
+            force_orthogonality (bool): in non-orthogonal surfaces, the density
+                is forced to be orthogonal.
         Returns:
             :class:`DensityTools.System`: object with atoms defined in
                 rest_atoms_names, and a 'box' in :method:`ase.Atoms.info`.
@@ -99,15 +101,20 @@ class System(ase.Atoms):
         names = dump[0].arrays['names']
         if box_atoms_names is None:
             box_atoms_names = np.unique(names).tolist()
-        n_voxl = np.asarray(np.round(np.linalg.norm(dump[0].get_cell(),
+        if force_orthogonality:
+            cell = dump[0].cell.array * np.eye(3)
+        else:
+            cell = dump[0].cell.array
+        n_voxl = np.asarray(np.round(np.linalg.norm(cell,
                                                     axis=1) / voxl_size),
                             dtype=int)
-        voxl = dump[0].get_cell() / n_voxl
+        voxl = cell / n_voxl
         if density:
             # If density is requested, then it is divided by voxl vol
             voxl_vol = np.dot(voxl[0, :], np.cross(voxl[1, :], voxl[2, :]))
         else:
             voxl_vol = 1
+
         box = np.zeros([len(box_atoms_names)] + n_voxl.tolist())
 
         rest_indx = np.where(np.sum([names == x
@@ -138,8 +145,15 @@ class System(ase.Atoms):
                     continue
                 com = atom.get_positions()[indx]
                 type_ind = box_atoms_names.index(names[indx])
-                voxl_indx = np.asarray(np.floor(np.linalg.solve(voxl.T, com)),
-                                       dtype=int)
+                voxl_indx = np.asarray(
+                    np.floor(
+                        np.linalg.solve(
+                            voxl.T,
+                            com
+                        ) % n_voxl
+                    ),
+                    dtype=int
+                )
                 try:
                     box[type_ind,
                         voxl_indx[0],
